@@ -1,17 +1,9 @@
+import math
 import time
 from abc import ABC, abstractmethod
 
 
 class Algorithm(ABC):
-    def __init__(self, limit: int, window: int) -> None:
-        if type(limit) is not int or type(window) is not int:
-            raise TypeError("limit and window must be integers")
-        if limit <= 0 or window <= 0:
-            raise ValueError("limit and window must be positive")
-
-        self.limit = limit
-        self.window = window
-
     @abstractmethod
     def allow(self, key: str) -> bool:
         """Return whether request identified by key allowed."""
@@ -20,7 +12,13 @@ class Algorithm(ABC):
 # Fixed-window counter algorithm
 class FixedWindowCounter(Algorithm):
     def __init__(self, limit: int, window: int) -> None:
-        super().__init__(limit, window)
+        if type(limit) is not int or type(window) is not int:
+            raise TypeError("limit and window must be integers")
+        if limit <= 0 or window <= 0:
+            raise ValueError("limit and window must be positive")
+
+        self.limit = limit
+        self.window = window
         self.perkey_state: dict[str, dict[str, float]] = {}
 
     def allow(self, key: str) -> bool:
@@ -42,21 +40,28 @@ class FixedWindowCounter(Algorithm):
 
 
 class TokenBucket(Algorithm):
-    def __init__(self, limit: int, window: int) -> None:
-        super().__init__(limit, window)
+    def __init__(self, capacity: int, refill_rate: float) -> None:
+        if type(capacity) is not int:
+            raise TypeError("capacity must be an integer")
+        if type(refill_rate) not in (int, float):
+            raise TypeError("refill_rate must be a number")
+        if capacity <= 0 or refill_rate <= 0 or not math.isfinite(refill_rate):
+            raise ValueError("capacity and refill_rate must be positive and finite")
+
+        self.capacity = capacity
+        self.refill_rate = refill_rate  # Tokens added per second.
         self.perkey_state: dict[str, dict[str, float]] = {}
 
     def allow(self, key: str) -> bool:
         now = time.monotonic()
         state = self.perkey_state.get(key)
         if state is None:
-            state = {"tokens": float(self.limit), "last_refill": now}
+            state = {"tokens": float(self.capacity), "last_refill": now}
             self.perkey_state[key] = state
 
         # Refilling when a request arrives
-        refill_rate = self.limit / self.window 
         elapsed = now - state["last_refill"]
-        state["tokens"] = min(self.limit, state["tokens"] + elapsed * refill_rate)
+        state["tokens"] = min(self.capacity, state["tokens"] + elapsed * self.refill_rate)
         state["last_refill"] = now
 
         if state["tokens"] < 1:
