@@ -1,6 +1,6 @@
-import math
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 
 class Algorithm(ABC):
@@ -39,20 +39,26 @@ class FixedWindowCounter(Algorithm):
         return True
 
 
-class TokenBucket(Algorithm):
+@dataclass(frozen=True)
+class RateLimitResult:
+    allowed: bool
+    tokens_remaining: float
+    retry_after: float
+
+
+class TokenBucket:
     def __init__(self, capacity: int, refill_rate: float) -> None:
-        if type(capacity) is not int:
-            raise TypeError("capacity must be an integer")
-        if type(refill_rate) not in (int, float):
-            raise TypeError("refill_rate must be a number")
-        if capacity <= 0 or refill_rate <= 0 or not math.isfinite(refill_rate):
-            raise ValueError("capacity and refill_rate must be positive and finite")
+        if capacity <= 0 or refill_rate <= 0:
+            raise ValueError("capacity and refill_rate must be positive")
 
         self.capacity = capacity
         self.refill_rate = refill_rate  # Tokens added per second.
         self.perkey_state: dict[str, dict[str, float]] = {}
 
-    def allow(self, key: str) -> bool:
+    def allow(self, key: str, cost: float = 1) -> RateLimitResult:
+        if cost <= 0 or cost > self.capacity:
+            raise ValueError("cost must be between 0 and capacity")
+
         now = time.monotonic()
         state = self.perkey_state.get(key)
         if state is None:
@@ -64,7 +70,17 @@ class TokenBucket(Algorithm):
         state["tokens"] = min(self.capacity, state["tokens"] + elapsed * self.refill_rate)
         state["last_refill"] = now
 
-        if state["tokens"] < 1:
-            return False
-        state["tokens"] -= 1
-        return True
+        if state["tokens"] < cost:
+            missing_tokens = cost - state["tokens"]
+            return RateLimitResult(
+                allowed=False,
+                tokens_remaining=state["tokens"],
+                retry_after=missing_tokens / self.refill_rate,
+            )
+
+        state["tokens"] -= cost
+        return RateLimitResult(
+            allowed=True,
+            tokens_remaining=state["tokens"],
+            retry_after=0.0,
+        )
