@@ -28,5 +28,14 @@ class CheckEndpointTests(unittest.TestCase):
         self.assertFalse(response.json()["allowed"])
 
 
+class AcquireReleaseEndpointTests(unittest.TestCase):
+    def test_acquire_then_release(self):
+        acquire_response = client.post("/acquire", json={"user_id": "carol"})
+        self.assertTrue(acquire_response.json()["acquired"])
+
+        release_response = client.post("/release", json={"user_id": "carol"})
+        self.assertTrue(release_response.json()["released"])
+
+
 if __name__ == "__main__":
     unittest.main()

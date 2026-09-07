@@ -1,3 +1,4 @@
+import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -84,3 +85,35 @@ class TokenBucket:
             tokens_remaining=state["tokens"],
             retry_after=0.0,
         )
+
+
+class ConcurrencyLimiter:
+    """Limits how many slots a key can hold at a time."""
+
+    def __init__(self, capacity: int) -> None:
+        if type(capacity) is not int:
+            raise TypeError("capacity must be an integer")
+        if capacity <= 0:
+            raise ValueError("capacity must be positive")
+
+        self.capacity = capacity
+        self.perkey_active: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def acquire(self, key: str) -> bool:
+        with self._lock:
+            active = self.perkey_active.get(key, 0)
+            if active >= self.capacity:
+                return False
+            self.perkey_active[key] = active + 1
+            return True
+
+    def release(self, key: str) -> None:
+        with self._lock:
+            active = self.perkey_active.get(key, 0)
+            if active <= 0:
+                return
+            if active == 1:
+                del self.perkey_active[key]
+            else:
+                self.perkey_active[key] = active - 1
