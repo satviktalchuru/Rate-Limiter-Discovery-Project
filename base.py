@@ -21,23 +21,25 @@ class FixedWindowCounter(Algorithm):
         self.limit = limit
         self.window = window
         self.perkey_state: dict[str, dict[str, float]] = {}
+        self._lock = threading.Lock()
 
     def allow(self, key: str) -> bool:
-        now = time.monotonic()
-        state = self.perkey_state.get(key)
+        with self._lock:
+            now = time.monotonic()
+            state = self.perkey_state.get(key)
 
-        if state is None or (now - state["window_start"]) >= self.window:
-            self.perkey_state[key] = {"count": 1, "window_start": now}
+            if state is None or (now - state["window_start"]) >= self.window:
+                self.perkey_state[key] = {"count": 1, "window_start": now}
+                return True
+
+            if state["count"] >= self.limit:
+                return False
+
+            self.perkey_state[key] = {
+                "count": state["count"] + 1,
+                "window_start": state["window_start"],
+            }
             return True
-
-        if state["count"] >= self.limit:
-            return False
-
-        self.perkey_state[key] = {
-            "count": state["count"] + 1,
-            "window_start": state["window_start"],
-        }
-        return True
 
 
 @dataclass(frozen=True)
@@ -55,36 +57,38 @@ class TokenBucket:
         self.capacity = capacity
         self.refill_rate = refill_rate  # Tokens added per second.
         self.perkey_state: dict[str, dict[str, float]] = {}
+        self._lock = threading.Lock()
 
     def allow(self, key: str, cost: float = 1) -> RateLimitResult:
         if cost <= 0 or cost > self.capacity:
             raise ValueError("cost must be between 0 and capacity")
 
-        now = time.monotonic()
-        state = self.perkey_state.get(key)
-        if state is None:
-            state = {"tokens": float(self.capacity), "last_refill": now}
-            self.perkey_state[key] = state
+        with self._lock:
+            now = time.monotonic()
+            state = self.perkey_state.get(key)
+            if state is None:
+                state = {"tokens": float(self.capacity), "last_refill": now}
+                self.perkey_state[key] = state
 
-        # Refilling when a request arrives
-        elapsed = now - state["last_refill"]
-        state["tokens"] = min(self.capacity, state["tokens"] + elapsed * self.refill_rate)
-        state["last_refill"] = now
+            # Refilling when a request arrives
+            elapsed = now - state["last_refill"]
+            state["tokens"] = min(self.capacity, state["tokens"] + elapsed * self.refill_rate)
+            state["last_refill"] = now
 
-        if state["tokens"] < cost:
-            missing_tokens = cost - state["tokens"]
+            if state["tokens"] < cost:
+                missing_tokens = cost - state["tokens"]
+                return RateLimitResult(
+                    allowed=False,
+                    tokens_remaining=state["tokens"],
+                    retry_after=missing_tokens / self.refill_rate,
+                )
+
+            state["tokens"] -= cost
             return RateLimitResult(
-                allowed=False,
+                allowed=True,
                 tokens_remaining=state["tokens"],
-                retry_after=missing_tokens / self.refill_rate,
+                retry_after=0.0,
             )
-
-        state["tokens"] -= cost
-        return RateLimitResult(
-            allowed=True,
-            tokens_remaining=state["tokens"],
-            retry_after=0.0,
-        )
 
 
 class ConcurrencyLimiter:

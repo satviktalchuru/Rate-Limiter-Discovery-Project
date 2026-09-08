@@ -33,6 +33,22 @@ class TokenBucketTests(unittest.TestCase):
         self.assertEqual(result.tokens_remaining, 0)
         self.assertEqual(result.retry_after, 1)
 
+    @patch("base.time.monotonic", return_value=0)
+    def test_concurrent_requests_never_exceed_capacity(self, clock):
+        bucket = TokenBucket(capacity=10, refill_rate=1)
+        results = []
+
+        def worker():
+            results.append(bucket.allow("alice").allowed)
+
+        threads = [threading.Thread(target=worker) for _ in range(50)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(results.count(True), 10)
+
 
 class FixedWindowCounterTests(unittest.TestCase):
     @patch("base.time.monotonic", return_value=0)
@@ -42,6 +58,22 @@ class FixedWindowCounterTests(unittest.TestCase):
         self.assertFalse(limiter.allow("alice"))
         clock.return_value = 10
         self.assertTrue(limiter.allow("alice"))
+
+    @patch("base.time.monotonic", return_value=0)
+    def test_concurrent_requests_never_exceed_limit(self, clock):
+        limiter = FixedWindowCounter(limit=10, window=10)
+        results = []
+
+        def worker():
+            results.append(limiter.allow("alice"))
+
+        threads = [threading.Thread(target=worker) for _ in range(50)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(results.count(True), 10)
 
 
 class ConcurrencyLimiterTests(unittest.TestCase):

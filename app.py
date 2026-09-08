@@ -1,12 +1,15 @@
+import redis
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from base import ConcurrencyLimiter, TokenBucket
+from base import TokenBucket
+from redis_limiter import RedisConcurrencyLimiter
 
 
 app = FastAPI()
 bucket = TokenBucket(capacity=10, refill_rate=2)
-limiter = ConcurrencyLimiter(capacity=10)
+redis_client = redis.Redis(host="localhost", port=6379)
+limiter = RedisConcurrencyLimiter(capacity=10, redis_client=redis_client)
 
 
 class RequestData(BaseModel):
