@@ -80,28 +80,40 @@ class ConcurrencyLimiterTests(unittest.TestCase):
     def test_acquire_up_to_capacity_then_rejects(self):
         limiter = ConcurrencyLimiter(capacity=2)
 
-        self.assertTrue(limiter.acquire("job-a"))
-        self.assertTrue(limiter.acquire("job-a"))
-        self.assertFalse(limiter.acquire("job-a"))
+        self.assertIsNotNone(limiter.acquire("job-a"))
+        self.assertIsNotNone(limiter.acquire("job-a"))
+        self.assertIsNone(limiter.acquire("job-a"))
 
     def test_release_frees_a_slot(self):
         limiter = ConcurrencyLimiter(capacity=1)
-        limiter.acquire("job-a")
+        token = limiter.acquire("job-a")
 
-        limiter.release("job-a")
+        limiter.release(token)
 
-        self.assertTrue(limiter.acquire("job-a"))
+        self.assertIsNotNone(limiter.acquire("job-a"))
 
     def test_zero_capacity_is_invalid(self):
         with self.assertRaises(ValueError):
             ConcurrencyLimiter(capacity=0)
+
+    def test_zero_lease_ttl_is_invalid(self):
+        with self.assertRaises(ValueError):
+            ConcurrencyLimiter(capacity=1, lease_ttl=0)
+
+    @patch("base.time.monotonic", return_value=0)
+    def test_expired_lease_is_freed_automatically(self, clock):
+        limiter = ConcurrencyLimiter(capacity=1, lease_ttl=10)
+        limiter.acquire("job-a")  # never released
+
+        clock.return_value = 10
+        self.assertIsNotNone(limiter.acquire("job-a"))
 
     def test_concurrent_acquires_never_exceed_capacity(self):
         limiter = ConcurrencyLimiter(capacity=10)
         results = []
 
         def worker():
-            results.append(limiter.acquire("job-a"))
+            results.append(limiter.acquire("job-a") is not None)
 
         threads = [threading.Thread(target=worker) for _ in range(50)]
         for thread in threads:

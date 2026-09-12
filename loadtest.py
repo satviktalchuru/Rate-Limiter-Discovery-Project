@@ -36,7 +36,7 @@ def fire_burst(limiter, args: argparse.Namespace) -> list[bool]:
         if args.algorithm == "token_bucket":
             admitted = limiter.allow(args.key, args.cost).allowed
         else:
-            admitted = limiter.acquire(args.key)
+            admitted = limiter.acquire(args.key) is not None
         with results_lock:
             results.append(admitted)
 
@@ -61,7 +61,7 @@ def fire_staggered(limiter, args: argparse.Namespace) -> list[bool]:
         if args.algorithm == "token_bucket":
             admitted = limiter.allow(args.key, args.cost).allowed
         else:
-            admitted = limiter.acquire(args.key)
+            admitted = limiter.acquire(args.key) is not None
         results.append(admitted)
         print(f"t={time.perf_counter() - started_at:6.2f}s admitted={admitted}")
         if i < args.clients - 1:

@@ -1,17 +1,11 @@
 import threading
 import time
-from abc import ABC, abstractmethod
+import uuid
 from dataclasses import dataclass
 
 
-class Algorithm(ABC):
-    @abstractmethod
-    def allow(self, key: str) -> bool:
-        """Return whether request identified by key allowed."""
-
-
 # Fixed-window counter algorithm
-class FixedWindowCounter(Algorithm):
+class FixedWindowCounter:
     def __init__(self, limit: int, window: int) -> None:
         if type(limit) is not int or type(window) is not int:
             raise TypeError("limit and window must be integers")
@@ -92,32 +86,46 @@ class TokenBucket:
 
 
 class ConcurrencyLimiter:
-    """Limits how many slots a key can hold at a time."""
+    #Limits how many slots a key can hold at a time.
+    #acquire(key) returns a lease token, #release(token) frees that slot. 
 
-    def __init__(self, capacity: int) -> None:
+    def __init__(self, capacity: int, lease_ttl: float = 3600.0) -> None:
         if type(capacity) is not int:
             raise TypeError("capacity must be an integer")
         if capacity <= 0:
             raise ValueError("capacity must be positive")
+        if lease_ttl <= 0:
+            raise ValueError("lease_ttl must be positive")
 
         self.capacity = capacity
-        self.perkey_active: dict[str, int] = {}
+        self.lease_ttl = lease_ttl
+        self.perkey_leases: dict[str, dict[str, float]] = {}
         self._lock = threading.Lock()
 
-    def acquire(self, key: str) -> bool:
+    def acquire(self, key: str) -> str | None:
         with self._lock:
-            active = self.perkey_active.get(key, 0)
-            if active >= self.capacity:
-                return False
-            self.perkey_active[key] = active + 1
-            return True
+            now = time.monotonic()
+            leases = self.perkey_leases.setdefault(key, {})
 
-    def release(self, key: str) -> None:
+            expired = [token for token, expires_at in leases.items() if expires_at <= now]
+            for token in expired:
+                del leases[token]
+
+            if len(leases) >= self.capacity:
+                if not leases:
+                    del self.perkey_leases[key]
+                return None
+
+            token = f"{key}:{uuid.uuid4().hex}"
+            leases[token] = now + self.lease_ttl
+            return token
+
+    def release(self, token: str) -> None:
         with self._lock:
-            active = self.perkey_active.get(key, 0)
-            if active <= 0:
+            key, _, _ = token.partition(":")
+            leases = self.perkey_leases.get(key)
+            if leases is None:
                 return
-            if active == 1:
-                del self.perkey_active[key]
-            else:
-                self.perkey_active[key] = active - 1
+            leases.pop(token, None)
+            if not leases:
+                del self.perkey_leases[key]
