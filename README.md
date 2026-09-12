@@ -1,8 +1,41 @@
 # Rate Limiter Discovery Project
 
-Learning how a rate limiter works by building one from scratch. The goal is to understand the algorithms behind a rate limiter and establish rusty OOP principles. Noticed how rate limiters show up almost everywhere, like in APIs, login endpoints, and message queues, and actually wanted to see how it worked underneath. I aim to do a deeper analysis in the tradeoffs between the various algorithms as I continue. 
+I'm building this from scratch to learn how rate limiters actually work,
+using a GPU-workload angle. There are three algorithms: a fixed window
+counter, a token bucket (where tokens refill over time and each request costs
+tokens), and a concurrency limiter (which holds a position until we release it). There's also a Redis-backed version of the concurrency limiter, so multiple processes can share one real count instead of each having their own.
 
+A FastAPI app wraps these into three endpoints: `/check` (token bucket),
+and `/acquire` / `/release` (Redis-backed concurrency limiter).
 
+## Setup
 
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
+Redis needs to be running locally (for the concurrency limiter and its tests):
 
+```bash
+docker run -d --name rate-limiter-redis -p 6379:6379 redis:7-alpine
+```
+
+Run the API:
+
+```bash
+uvicorn app:app --reload
+```
+
+Run all the tests:
+
+```bash
+python3 -m unittest discover
+```
+
+Try different rate-limit configs without touching the server:
+
+```bash
+python3 loadtest.py --algorithm concurrency --capacity 8 --clients 20
+```
